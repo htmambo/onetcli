@@ -97,7 +97,11 @@ impl GoogleDriveAuthDialog {
         let http = cx.http_client();
 
         let task = cx.spawn(async move |cx| {
-            match one_core::cloud_sync::oauth::callback_server::start_callback_server(8787, 300) {
+            match one_core::cloud_sync::oauth::callback_server::start_callback_server_async(
+                8787, 300,
+            )
+            .await
+            {
                 Ok((_port, callback)) => {
                     if !callback.is_success() {
                         let msg = callback
@@ -389,7 +393,11 @@ impl OneDriveAuthDialog {
         let http = cx.http_client();
 
         let task = cx.spawn(async move |cx| {
-            match one_core::cloud_sync::oauth::callback_server::start_callback_server(8787, 300) {
+            match one_core::cloud_sync::oauth::callback_server::start_callback_server_async(
+                8787, 300,
+            )
+            .await
+            {
                 Ok((_port, callback)) => {
                     if !callback.is_success() {
                         let msg = callback

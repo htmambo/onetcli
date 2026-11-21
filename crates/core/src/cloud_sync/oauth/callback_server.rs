@@ -63,6 +63,10 @@ pub struct OAuthCallback {
 ///
 /// `port` 为 0 时自动选择可用端口。
 /// 返回实际使用的端口和 auth code。
+///
+/// **阻塞调用**：内部以非阻塞 socket + 轮询等待回调，最长占用一个线程
+/// `timeout_secs` 秒。**UI 线程请使用 [`start_callback_server_async`]**，
+/// 否则会冻结整个界面直到用户完成浏览器授权。
 pub fn start_callback_server(
     port: u16,
     timeout_secs: u64,
@@ -86,8 +90,11 @@ pub fn start_callback_server(
     };
 
     let (actual_port, listener) = addr;
+    // 必须是非阻塞 socket：`accept_with_deadline` 依赖 `WouldBlock` 分支做
+    // 带超时的轮询。设为阻塞模式会让 `accept()` 一直挂起，轮询分支形同虚设，
+    // 调用方线程（若在 UI 线程）会被冻结到超时。
     listener
-        .set_nonblocking(false)
+        .set_nonblocking(true)
         .map_err(|e| CallbackServerError::StartFailed(e.to_string()))?;
 
     let timeout = Duration::from_secs(timeout_secs);
@@ -99,7 +106,9 @@ pub fn start_callback_server(
         Err(e) => return Err(e),
     };
 
-    // 读取 HTTP 请求
+    // 读取 HTTP 请求：设置读超时，避免对端连上但不发数据时无限期挂起。
+    // accept 返回的 socket 是阻塞的（不继承 O_NONBLOCK），因此读超时有效。
+    let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
     let mut buffer = [0u8; 4096];
     let _ = stream.read(&mut buffer);
 
@@ -125,6 +134,24 @@ pub fn start_callback_server(
 
     Ok((actual_port, callback))
 }
+
+/// 启动本地回调服务器（异步版，UI 线程安全）
+///
+/// 阻塞的 accept 放到 tokio 阻塞线程池执行，调用方 `.await` 期间不占用调用
+/// 线程。用于「连接 Google Drive / OneDrive」这类需要在等待浏览器授权的
+/// 同时保持界面可响应的场景。
+pub async fn start_callback_server_async(
+    port: u16,
+    timeout_secs: u64,
+) -> Result<(u16, OAuthCallback), CallbackServerError> {
+    match tokio::task::spawn_blocking(move || start_callback_server(port, timeout_secs)).await {
+        Ok(result) => result,
+        Err(join_err) => Err(CallbackServerError::ConnectionError(join_err.to_string())),
+    }
+}
+
+/// 等待回调时读取 HTTP 请求的超时上限。
+const READ_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// 带超时的 accept
 fn accept_with_deadline(

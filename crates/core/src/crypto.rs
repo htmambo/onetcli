@@ -100,6 +100,21 @@ static ENCRYPTION_KEY: RwLock<Option<[u8; 32]>> = RwLock::new(None);
 /// 双槽的设计保证 SHA-256 派生与 Argon2id 派生互不污染。
 static ENCRYPTION_KEY_V3: RwLock<Option<[u8; 32]>> = RwLock::new(None);
 
+/// V3 派生密钥缓存：(主密钥摘要, salt 摘要, 派生结果)
+///
+/// Argon2id 单次派生约 50-150ms，而云同步会对**每个连接**分别加解密，
+/// 冷启动也会重新派生一次，导致 UI 线程反复付出百毫秒级 CPU 占用。
+/// 缓存仅避免"同一主密钥 + 同一 salt"的重复派生，不改变任何密码学属性：
+/// 派生结果本就以 `ENCRYPTION_KEY_V3` 常驻内存，缓存不新增攻击面。
+///
+/// 安全取舍：只保存主密钥的 SHA-256 摘要，不保存明文；主密钥明文仍按
+/// S2 约定不常驻进程静态区。切换主密钥时摘要不匹配会自动失效重算，
+/// [`clear_master_key`] 会显式清空缓存。
+/// 派生密钥缓存条目：(主密钥摘要, salt 摘要, 派生结果)
+type DerivedKeyCache = ([u8; 32], [u8; 32], [u8; 32]);
+
+static DERIVED_KEY_V3_CACHE: RwLock<Option<DerivedKeyCache>> = RwLock::new(None);
+
 /// 全局原始主密钥存储。
 ///
 /// **撤销说明（S2）**：原实现把主密钥明文以 `String` 形式常驻进程静态区，存在
@@ -173,11 +188,36 @@ const MASTER_KEY_APP_SALT_V3: &[u8] = b"omnihub-master-key-v3-argon2id-salt-v1";
 /// 必须为每个候选值执行 Argon2id；其拉伸因子默认 ~100ms / 候选，
 /// 使 GPU 暴力枚举的实际效率下降到难以承受的水平。
 fn derive_key_v3(master_key: &str, salt: &[u8]) -> [u8; 32] {
+    // 缓存命中检查：同一主密钥 + 同一 salt 时直接复用派生结果。
+    // Argon2id 单次派生约 50-150ms，云同步逐连接加解密会反复付出该开销。
+    let mut master_digest = [0u8; 32];
+    master_digest.copy_from_slice(&Sha256::digest(master_key.as_bytes()));
+    let mut salt_digest = [0u8; 32];
+    salt_digest.copy_from_slice(&Sha256::digest(salt));
+
+    if let Ok(guard) = DERIVED_KEY_V3_CACHE.read()
+        && let Some((cached_master, cached_salt, cached_key)) = *guard
+        && cached_master == master_digest
+        && cached_salt == salt_digest
+    {
+        return cached_key;
+    }
+
     let mut derived_key = [0u8; 32];
     let argon2 = Argon2::default();
     let _ = argon2.hash_password_into(master_key.as_bytes(), salt, &mut derived_key);
+    #[cfg(test)]
+    DERIVE_V3_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+    if let Ok(mut guard) = DERIVED_KEY_V3_CACHE.write() {
+        *guard = Some((master_digest, salt_digest, derived_key));
+    }
     derived_key
 }
+
+/// 慢路径（实际执行 Argon2id 拉伸）计数，供单测断言缓存是否命中。
+#[cfg(test)]
+static DERIVE_V3_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// 验证数据魔术串前缀（用于标识新格式）
 const VERIFICATION_V2_PREFIX: &str = "V2:";
@@ -407,6 +447,9 @@ pub fn clear_master_key() {
         *guard = None;
     }
     if let Ok(mut guard) = ENCRYPTION_KEY_V3.write() {
+        *guard = None;
+    }
+    if let Ok(mut guard) = DERIVED_KEY_V3_CACHE.write() {
         *guard = None;
     }
     // S2：RAW_MASTER_KEY 已撤销，无需清理。
@@ -1299,5 +1342,33 @@ mod tests {
 
         clear_master_key();
         assert!(raw_master_key_for_sync().is_none());
+    }
+
+    /// 回归守护：V3 派生密钥缓存命中，避免每次加解密都重跑 Argon2id。
+    ///
+    /// Argon2id 单次约 50-150ms，云同步逐连接加解密会把该开销放大到秒级。
+    #[test]
+    fn derive_key_v3_cache_avoids_repeated_derivation() {
+        let _guard = lock_for_test();
+
+        let first = derive_key_v3("cache_probe_key", MASTER_KEY_APP_SALT_V3);
+        let calls_after_first = DERIVE_V3_CALLS.load(std::sync::atomic::Ordering::Relaxed);
+
+        let second = derive_key_v3("cache_probe_key", MASTER_KEY_APP_SALT_V3);
+        let calls_after_second = DERIVE_V3_CALLS.load(std::sync::atomic::Ordering::Relaxed);
+
+        assert_eq!(first, second, "同一主密钥派生结果必须一致");
+        assert_eq!(
+            calls_after_first, calls_after_second,
+            "缓存命中时不应再次执行 Argon2id 拉伸"
+        );
+
+        // 主密钥变化后摘要不匹配，必须重新派生
+        let calls_before_switch = DERIVE_V3_CALLS.load(std::sync::atomic::Ordering::Relaxed);
+        let _ = derive_key_v3("cache_probe_key_other", MASTER_KEY_APP_SALT_V3);
+        assert!(
+            DERIVE_V3_CALLS.load(std::sync::atomic::Ordering::Relaxed) > calls_before_switch,
+            "主密钥变化后必须重新派生，不能复用旧缓存"
+        );
     }
 }

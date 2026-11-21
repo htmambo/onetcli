@@ -394,26 +394,42 @@ struct UpdateOptions {
 }
 
 fn parse_content(format: TextViewFormat, options: &UpdateOptions) -> Result<(), SharedString> {
+    // 阶段一：仅短暂持锁，读取增量解析所需的旧状态快照。
+    //
+    // 解析（tree-sitter 语法高亮）可能耗时数十毫秒，若在持锁期间执行，
+    // UI 线程的 render 读同一把 `parsed_content` 锁就会被整段阻塞
+    // （AI 流式输出时每 50ms 触发一次解析，卡顿尤其明显）。
+    let (append_offset, base_source, previous_source) = {
+        // 锁中毒时继续使用已有内容，不因 panic 影响渲染
+        let content = options.content.lock().unwrap_or_else(|e| e.into_inner());
+        let offset = content
+            .document
+            .blocks
+            .last()
+            .and_then(|block| block.span())
+            .map(|span| span.start);
+        let base = match (options.append, offset) {
+            (true, Some(start)) => content.document.source[start..].to_string(),
+            _ => String::new(),
+        };
+        (offset, base, content.document.source.clone())
+    };
+
     let mut node_cx = NodeContext {
         code_block_actions: options.code_block_actions.clone(),
         code_block_renderer: options.code_block_renderer.clone(),
         ..NodeContext::default()
     };
 
-    let mut content = options.content.lock().unwrap();
-    let mut source = String::new();
-    if options.append
-        && let Some(last_block) = content.document.blocks.pop()
-        && let Some(span) = last_block.span()
-    {
-        node_cx.offset = span.start;
-        let last_source = &content.document.source[span.start..];
-        source.push_str(last_source);
+    let mut source = base_source;
+    if options.append && append_offset.is_some() {
+        node_cx.offset = append_offset.unwrap_or(0);
         source.push_str(&options.pending_text);
     } else {
         source = options.pending_text.to_string();
     }
 
+    // 阶段二：锁外解析。
     let new_content = match format {
         TextViewFormat::Markdown => {
             format::markdown::parse(&source, &mut node_cx, &options.highlight_theme)
@@ -421,12 +437,23 @@ fn parse_content(format: TextViewFormat, options: &UpdateOptions) -> Result<(), 
         TextViewFormat::Html => format::html::parse(&source, &mut node_cx),
     }?;
 
-    if options.append {
-        content.document.source =
-            format!("{}{}", content.document.source, options.pending_text).into();
-        content.document.blocks.extend(new_content.blocks);
-    } else {
-        content.document = new_content;
+    // 阶段三：短暂持锁写回。
+    {
+        let mut content = options.content.lock().unwrap_or_else(|e| e.into_inner());
+        if options.append {
+            // 移除被本次重解析覆盖的旧 block（起点不早于 append_offset 的部分）。
+            // 用 retain 而非 pop：解析失败时不会丢失旧内容。
+            if let Some(offset) = append_offset {
+                content
+                    .document
+                    .blocks
+                    .retain(|block| block.span().map(|span| span.start < offset).unwrap_or(true));
+            }
+            content.document.source = format!("{}{}", previous_source, options.pending_text).into();
+            content.document.blocks.extend(new_content.blocks);
+        } else {
+            content.document = new_content;
+        }
     }
 
     Ok(())
